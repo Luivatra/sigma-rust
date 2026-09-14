@@ -215,6 +215,7 @@ mod tests {
         26, 23, 8, 30, 19, 4, 15,
     ];
 
+    // Ordering only: the JVM ContextExtension serializer allows at most 127 entries.
     const SCALA_212_HAMT_ORDER_128: [u8; 128] = [
         69, 101, 0, 88, 115, 5, 120, 10, 56, 42, 24, 37, 25, 52, 14, 110, 125, 20, 46, 93, 57, 78,
         29, 106, 121, 84, 61, 89, 116, 1, 74, 6, 60, 117, 85, 102, 28, 38, 70, 21, 33, 92, 65, 97,
@@ -317,12 +318,30 @@ mod tests {
             serialized_keys(&ext_32).as_slice(),
             &SCALA_212_HAMT_ORDER_32
         );
+    }
 
-        let ext_128 = context_extension_with_int_constants(0..128);
-        assert_eq!(
-            serialized_keys(&ext_128).as_slice(),
-            &SCALA_212_HAMT_ORDER_128
-        );
+    #[test]
+    fn test_serialize_all_five_entry_insertion_orders() {
+        // Scala 2.12 switches from Map4 insertion order to HashMap traversal at five entries.
+        // For these keys the JVM order is [0, 5, 1, 2, 3], distinct from numeric order.
+        const EXPECTED_BYTES: [u8; 16] = [5, 0, 4, 0, 5, 4, 10, 1, 4, 2, 2, 4, 4, 3, 4, 6];
+
+        fn check_permutations(keys: &mut [u8; 5], start: usize) -> usize {
+            if start == keys.len() {
+                let ext = context_extension_with_int_constants(keys.iter().copied());
+                assert_eq!(ext.sigma_serialize_bytes().unwrap(), EXPECTED_BYTES);
+                return 1;
+            }
+            let mut checked = 0;
+            for next in start..keys.len() {
+                keys.swap(start, next);
+                checked += check_permutations(keys, start + 1);
+                keys.swap(start, next);
+            }
+            checked
+        }
+
+        assert_eq!(check_permutations(&mut [0, 1, 2, 3, 5], 0), 120);
     }
 
     #[test]
