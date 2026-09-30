@@ -107,6 +107,20 @@ impl<T: ErgoTransaction> TransactionContext<T> {
     }
 }
 
+/// Per-input diagnostics produced by [`TransactionContext::validate_with_report`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InputReport {
+    /// Input cost in block-cost units (script evaluation plus sigma verification cost) once
+    /// evaluation got that far. `None` if the input was not evaluated or evaluation failed
+    /// before a cost was known (cost limit, verifier error). A proof that did not verify
+    /// keeps the cost reached. Storage-rent spends report `StorageContractCost`.
+    pub cost: Option<u64>,
+    /// The input's proof verified (or the input was a valid storage-rent spend).
+    pub verified: bool,
+    /// The input's proposition reduced to `TrivialProp(false)`.
+    pub reduced_to_trivial_false: bool,
+}
+
 /// Fixed JIT cost (in block-cost units) charged once per transaction for interpreter
 /// initialization, matching Scala's `interpreterInitCost`.
 pub(crate) const INTERPRETER_INIT_COST: u64 = 10_000;
@@ -151,6 +165,22 @@ impl TransactionContext<Transaction> {
     /// Returns the total accumulated script evaluation cost (in block cost units).
     // This is based on validateStateful() in Ergo: https://github.com/ergoplatform/ergo/blob/48239ef98ced06617dc21a0eee5670235e362933/ergo-core/src/main/scala/org/ergoplatform/modifiers/mempool/ErgoTransaction.scala#L357
     pub fn validate(&self, state_context: &ErgoStateContext) -> Result<u64, TxValidationError> {
+        let mut reports = Vec::new();
+        self.validate_with_report(state_context, &mut reports)
+    }
+
+    /// Same as [`Self::validate`], and additionally fills `reports` with one entry per
+    /// transaction input (in input order): the input's cost in block-cost units, whether its
+    /// proof verified, and whether its proposition reduced to `TrivialProp(false)`. Inputs
+    /// that were not evaluated (validation failed earlier) keep the default entry.
+    /// Intended for differential testing; the verdict is identical to `validate`.
+    pub fn validate_with_report(
+        &self,
+        state_context: &ErgoStateContext,
+        reports: &mut Vec<InputReport>,
+    ) -> Result<u64, TxValidationError> {
+        reports.clear();
+        reports.resize(self.spending_tx.inputs.len(), InputReport::default());
         // Check that input sum does not overflow. The reference implementation
         // sums with Math.addExact over longs (validateStateful), so every
         // addition is checked — a plain sum would panic in debug builds and
@@ -226,6 +256,7 @@ impl TransactionContext<Transaction> {
         // MaxBlockCost is therefore accepted even though the un-floored JIT sum exceeds
         // MaxBlockCost * 10 — the exact-fit boundary we must admit.
         let mut total_cost: u64 = init_cost_block;
+        #[allow(clippy::needless_range_loop)] // `input_idx` also indexes `self.spending_tx.inputs`
         for input_idx in 0..self.spending_tx.inputs.len() {
             update_context(&mut context, self, input_idx)?;
             let input = self
@@ -243,6 +274,7 @@ impl TransactionContext<Transaction> {
             // block limit (`bsBlockTransactionsCost`).
             match storage_rent_verdict(&input.spending_proof.proof, state_context, &context) {
                 StorageRentVerdict::Verdict(false) => {
+                    reports[input_idx].cost = Some(STORAGE_CONTRACT_COST);
                     return Err(TxValidationError::ReducedToFalse(
                         input_idx,
                         VerificationResult {
@@ -266,6 +298,8 @@ impl TransactionContext<Transaction> {
                         ));
                     }
                     total_cost += STORAGE_CONTRACT_COST;
+                    reports[input_idx].cost = Some(STORAGE_CONTRACT_COST);
+                    reports[input_idx].verified = true;
                     continue;
                 }
                 StorageRentVerdict::NotApplicable => {}
@@ -296,6 +330,10 @@ impl TransactionContext<Transaction> {
             // budget (JVM `addCostChecked` / `bsBlockTransactionsCost`, block units).
             let crypto_cost_block = estimate_crypto_cost(&reduction.sigma_prop) / 10;
             let input_cost_block = reduction.cost + crypto_cost_block;
+            reports[input_idx].reduced_to_trivial_false = matches!(
+                reduction.sigma_prop,
+                ergotree_ir::sigma_protocol::sigma_boolean::SigmaBoolean::TrivialProp(false)
+            );
             if input_cost_block > remaining_block {
                 return Err(TxValidationError::VerifierError(
                     input_idx,
@@ -311,6 +349,8 @@ impl TransactionContext<Transaction> {
                 input.spending_proof.proof.as_ref(),
             )
             .map_err(|e| TxValidationError::VerifierError(input_idx, e))?;
+            reports[input_idx].cost = Some(input_cost_block);
+            reports[input_idx].verified = verified;
             if !verified {
                 return Err(TxValidationError::ReducedToFalse(
                     input_idx,

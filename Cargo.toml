@@ -13,6 +13,7 @@ members = [
     "ergo-rest",
     "ergo-chain-types",
     "ergo-nipopow",
+    "ergo-parity",
     "ergo-merkle-tree",
     "gf2_192",
     "bindings/ergo-lib-wasm",
@@ -111,3 +112,9 @@ criterion = { version = "0.5.1", features = ["default", "cargo_bench_support"] }
 # Tell `rustc` to optimize for small code size.
 opt-level = "z"
 lto = true
+
+# Speed-optimised build for the ergo-parity harness (`cargo build --profile parity -p ergo-parity`).
+[profile.parity]
+inherits = "release"
+opt-level = 3
+lto = false
