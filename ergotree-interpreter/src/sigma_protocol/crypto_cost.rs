@@ -35,7 +35,10 @@ pub fn estimate_crypto_cost(prop: &SigmaBoolean) -> u64 {
                 let n_coefs = n - ct.k as u64;
                 let parse_poly = 10 + 10 * n_coefs;
                 let eval_poly = (3 + 3 * n_coefs) * n;
-                parse_poly + eval_poly + ct.children.iter().map(estimate_crypto_cost).sum::<u64>()
+                parse_poly
+                    + eval_poly
+                    + TO_BYTES_CONJUNCTION
+                    + ct.children.iter().map(estimate_crypto_cost).sum::<u64>()
             }
         },
     }
@@ -116,6 +119,8 @@ mod tests {
         let ct = Cthreshold { k: 2, children };
         let prop = SigmaBoolean::from(ct);
         // n=3, k=2, n_coefs=1, parse_poly=10+10=20, eval_poly=(3+3)*3=18, children=3*3980=11940
-        assert_eq!(estimate_crypto_cost(&prop), 20 + 18 + 11940);
+        // parse 20 + eval 18 + ToBytes_ProofTreeConjecture 15 + 3 x ProveDlog 3980
+        // (Interpreter.estimateCryptoVerifyCost, CTHRESHOLD case)
+        assert_eq!(estimate_crypto_cost(&prop), 20 + 18 + 15 + 11940);
     }
 }
