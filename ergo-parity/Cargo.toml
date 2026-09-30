@@ -1,0 +1,22 @@
+[package]
+name = "ergo-parity"
+version = "0.1.0"
+edition.workspace = true
+license = "CC0-1.0"
+publish = false
+description = "Differential harness: sigma-rust vs the Ergo node's transaction validation"
+
+[dependencies]
+ergo-lib = { workspace = true }
+ergotree-ir = { workspace = true }
+ergotree-interpreter = { workspace = true }
+ergo-chain-types = { workspace = true }
+sigma-ser = { workspace = true }
+sigma-util = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["std", "arbitrary_precision"] }
+base16 = { workspace = true, features = ["std"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
